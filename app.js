@@ -12,6 +12,45 @@
 'use strict';
 
 /* ─────────────────────────────────────────────────────────
+   0. SUPABASE — CONFIGURACIÓN + MODO (real vs demo)
+
+   SUPABASE_URL / SUPABASE_ANON_KEY se reemplazan en build time
+   por el workflow de GitHub Actions ("Inyectar URL de Supabase
+   en app.js"). Si tu deploy.yml usa otros tokens de reemplazo,
+   ajusta esos dos placeholders para que coincidan.
+
+   Si al desplegar estos placeholders NO fueron reemplazados
+   (ej. estás abriendo el archivo local sin pasar por el
+   workflow), la app cae automáticamente a MODO DEMO con datos
+   simulados, igual que antes.
+───────────────────────────────────────────────────────── */
+const SUPABASE_URL      = '__SUPABASE_URL__';
+const SUPABASE_ANON_KEY = '__SUPABASE_ANON_KEY__';
+
+const SUPABASE_CONFIGURED =
+  !SUPABASE_URL.includes('__SUPABASE_URL__') &&
+  !SUPABASE_ANON_KEY.includes('__SUPABASE_ANON_KEY__') &&
+  SUPABASE_URL.startsWith('http');
+
+const supabaseClient = (SUPABASE_CONFIGURED && window.supabase)
+  ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+  : null;
+
+/** Slug de la rifa a mostrar, tomado de ?r=slug en la URL.
+ *  Sin slug (ej. visitar index.html directo) → modo demo local. */
+const RAFFLE_SLUG = new URLSearchParams(window.location.search).get('r');
+
+const REAL_MODE = Boolean(SUPABASE_CONFIGURED && RAFFLE_SLUG);
+
+/** Construye un link público a una rifa respetando el dominio
+ *  real donde esté alojado el sitio (GitHub Pages, dominio propio, etc.)
+ *  en vez de un dominio hardcodeado. */
+function buildRaffleLink(slug) {
+  const base = window.location.origin + window.location.pathname.replace(/[^/]*$/, '');
+  return `${base}?r=${encodeURIComponent(slug)}`;
+}
+
+/* ─────────────────────────────────────────────────────────
    1. CATÁLOGO DE LOTERÍAS COLOMBIANAS
    Incluye día(s) de sorteo y frecuencia
 ───────────────────────────────────────────────────────── */
@@ -79,16 +118,116 @@ const STATUS = Object.freeze({ AVAILABLE:'available', RESERVED:'reserved', SOLD:
 /* ─────────────────────────────────────────────────────────
    4. INIT
 ───────────────────────────────────────────────────────── */
-document.addEventListener('DOMContentLoaded', () => {
-  loadDemoPhotos();       // Cargar fotos de demo
-  renderPrizeGallery();   // Montar galería
-  renderRaffleHero();     // Montar hero con lotería y fecha
-  startCountdown();       // Cuenta regresiva
-  initTicketData();
+document.addEventListener('DOMContentLoaded', async () => {
+  if (REAL_MODE) {
+    const ok = await loadRaffleFromSupabase();
+    if (!ok) return; // loadRaffleFromSupabase ya mostró el error en pantalla
+  } else {
+    loadDemoPhotos();
+    if (RAFFLE_SLUG && !SUPABASE_CONFIGURED) {
+      console.warn('[RIFATECH] Slug presente pero Supabase no está configurado. Usando modo demo.');
+    }
+  }
+
+  renderPrizeGallery();
+  renderRaffleHero();
+  startCountdown();
+
+  if (REAL_MODE) {
+    await initTicketDataFromSupabase();
+  } else {
+    initTicketData();
+  }
+
   renderGrid();
   updateStats();
-  connectWebSocket();
+
+  if (REAL_MODE) {
+    connectRealtime();
+  } else {
+    connectWebSocket();
+  }
 });
+
+/* ─────────────────────────────────────────────────────────
+   0b. CARGA REAL DE LA RIFA DESDE SUPABASE
+───────────────────────────────────────────────────────── */
+async function loadRaffleFromSupabase() {
+  const { data, error } = await supabaseClient
+    .from('raffles')
+    .select('*')
+    .eq('slug', RAFFLE_SLUG)
+    .maybeSingle();
+
+  if (error || !data) {
+    console.error('[RIFATECH] Error cargando rifa:', error);
+    showRaffleNotFound();
+    return false;
+  }
+
+  RAFFLE.id             = data.id;
+  RAFFLE.prizeName      = data.prize_name;
+  RAFFLE.prizeValue     = data.prize_value_cop;
+  RAFFLE.ticketPrice    = data.ticket_price;
+  RAFFLE.totalNumbers   = data.total_numbers;
+  RAFFLE.drawDate       = data.draw_date;
+  RAFFLE.reservationTtl = (data.reservation_ttl || 900) * 1000;
+  RAFFLE.prizePhotos    = data.prize_image_url ? [data.prize_image_url] : [];
+
+  // La lotería se guarda en la DB como texto (lottery_name);
+  // se busca el catálogo local para día/frecuencia de sorteo.
+  const match = LOTERIAS.find(l => l.name === data.lottery_name);
+  RAFFLE.lotteryId = match ? match.id : 'otro';
+  if (!match && data.lottery_name) {
+    LOTERIAS.push({ id: 'otro', name: data.lottery_name, days: [], dayLabel: '—', freq: 'único' });
+  }
+
+  return true;
+}
+
+function showRaffleNotFound() {
+  document.querySelector('main.main-content').innerHTML = `
+    <div style="padding:60px 20px;text-align:center;color:var(--t2,#8a94a6)">
+      <div style="font-size:48px;margin-bottom:12px">🔍</div>
+      <h2 style="color:var(--t1,#fff);margin-bottom:8px">Rifa no encontrada</h2>
+      <p>Este link no corresponde a ninguna rifa activa. Verifica el enlace o contacta al organizador.</p>
+    </div>`;
+  const bar = document.getElementById('sticky-bar');
+  if (bar) bar.style.display = 'none';
+}
+
+async function initTicketDataFromSupabase() {
+  const { data, error } = await supabaseClient
+    .from('tickets')
+    .select('number, status, expires_at')
+    .eq('raffle_id', RAFFLE.id)
+    .order('number');
+
+  State.tickets.clear();
+  if (error || !data) {
+    console.error('[RIFATECH] Error cargando tickets:', error);
+    return;
+  }
+
+  data.forEach(t => {
+    State.tickets.set(t.number, {
+      status: mapDbStatus(t.status),
+      buyerName: null,
+      expiresAt: t.expires_at ? new Date(t.expires_at).getTime() : null,
+    });
+    if (t.status === 'reserved' && t.expires_at) {
+      scheduleLocalExpiry(t.number, new Date(t.expires_at).getTime());
+    }
+  });
+}
+
+/** Traduce el enum de la DB (available|reserved|paid|expired)
+ *  al estado visual del frontend (available|reserved|sold). */
+function mapDbStatus(dbStatus) {
+  if (dbStatus === 'paid') return STATUS.SOLD;
+  if (dbStatus === 'reserved') return STATUS.RESERVED;
+  return STATUS.AVAILABLE; // available | expired
+}
 
 /* ─────────────────────────────────────────────────────────
    5. FOTOS DEL PREMIO
@@ -376,9 +515,18 @@ async function confirmReservation() {
   btn.textContent = 'Procesando…';
 
   try {
-    await simulateApiReserve(numbers, name, phone);
+    let ref, expiresAt;
 
-    const expiresAt = Date.now() + RAFFLE.reservationTtl;
+    if (REAL_MODE) {
+      const result = await reserveTicketsSupabase(numbers, name, phone);
+      ref = result.serialRef;
+      expiresAt = result.expiresAt;
+    } else {
+      await simulateApiReserve();
+      ref = generateSerialRef();
+      expiresAt = Date.now() + RAFFLE.reservationTtl;
+    }
+
     numbers.forEach(n => {
       State.tickets.set(n, { status: STATUS.RESERVED, buyerName: name, expiresAt });
       applyButtonState(n, STATUS.RESERVED);
@@ -390,7 +538,6 @@ async function confirmReservation() {
     updateStats();
     closeModal();
 
-    const ref = generateSerialRef();
     State.lastReservation = { numbers, buyerName: name, buyerPhone: phone, serialRef: ref, expiresAt };
 
     showTicket(State.lastReservation);
@@ -406,6 +553,7 @@ async function confirmReservation() {
       });
       updateStickyBar();
     } else {
+      console.error('[RIFATECH] Error de reserva:', err);
       showToast('❌ Error de conexión. Intenta de nuevo.');
     }
   } finally {
@@ -416,6 +564,37 @@ async function confirmReservation() {
 
 function simulateApiReserve() {
   return new Promise(res => setTimeout(res, 800));
+}
+
+/** Llama al stored procedure reserve_tickets() de Postgres.
+ *  Lanza { code:409, conflicted:[...] } si algún número ya no
+ *  estaba disponible (mismo contrato de error que usaba el mock). */
+async function reserveTicketsSupabase(numbers, name, phone) {
+  const { data, error } = await supabaseClient.rpc('reserve_tickets', {
+    p_raffle_id: RAFFLE.id,
+    p_numbers: numbers,
+    p_buyer_name: name,
+    p_buyer_phone: phone,
+    p_ttl_sec: RAFFLE.reservationTtl / 1000,
+  });
+
+  if (error) {
+    if (error.code === '40001' || /CONFLICT/.test(error.message || '')) {
+      const match = (error.message || '').match(/\{([\d,]+)\}/);
+      const conflicted = match ? match[1].split(',').map(Number) : numbers;
+      const e = new Error('conflict');
+      e.code = 409;
+      e.conflicted = conflicted;
+      throw e;
+    }
+    throw error;
+  }
+
+  const row = Array.isArray(data) ? data[0] : data;
+  return {
+    serialRef: row.serial_ref,
+    expiresAt: Date.now() + RAFFLE.reservationTtl,
+  };
 }
 
 /* ─────────────────────────────────────────────────────────
@@ -442,6 +621,33 @@ function expireReservation(num) {
 ───────────────────────────────────────────────────────── */
 function connectWebSocket() {
   simulateRealtimeEvents();
+}
+
+/** Suscripción real a cambios en la tabla tickets para esta rifa. */
+function connectRealtime() {
+  supabaseClient
+    .channel(`raffle:${RAFFLE.id}`)
+    .on('postgres_changes', {
+      event: 'UPDATE',
+      schema: 'public',
+      table: 'tickets',
+      filter: `raffle_id=eq.${RAFFLE.id}`,
+    }, (payload) => {
+      const t = payload.new;
+      const status = mapDbStatus(t.status);
+      if (status === STATUS.RESERVED) {
+        handleWsMessage({
+          type: 'ticket_reserved',
+          number: t.number,
+          expiresAt: t.expires_at ? new Date(t.expires_at).getTime() : null,
+        });
+      } else if (status === STATUS.SOLD) {
+        handleWsMessage({ type: 'ticket_sold', number: t.number });
+      } else if (status === STATUS.AVAILABLE) {
+        handleWsMessage({ type: 'ticket_expired', number: t.number });
+      }
+    })
+    .subscribe();
 }
 
 function handleWsMessage(msg) {
@@ -503,7 +709,7 @@ function showTicket({ numbers, buyerName, buyerPhone, serialRef, expiresAt }) {
   const drawDateFmt = RAFFLE.drawDate
     ? new Date(RAFFLE.drawDate + 'T12:00:00').toLocaleDateString('es-CO', { day:'numeric', month:'long', year:'numeric' })
     : '—';
-  const qrUrl = `https://rifatech.co/v/${serialRef}`;
+  const qrUrl = REAL_MODE ? buildRaffleLink(RAFFLE_SLUG) : `${window.location.origin}/v/${serialRef}`;
 
   // Foto del premio en el ticket
   const photoHTML = (photos && photos.length > 0)
@@ -664,7 +870,7 @@ function shareTicketWhatsApp() {
     `💳 Total pagado: ${total}`,
     `🔖 Ref: ${r.serialRef}`,
     ``,
-    `✅ Verifica tu boleta en: https://rifatech.co/v/${r.serialRef}`,
+    `✅ Verifica tu boleta en: ${REAL_MODE ? buildRaffleLink(RAFFLE_SLUG) : window.location.href}`,
     ``,
     `_¡Mucha suerte! 🍀_`,
   ].join('\n');

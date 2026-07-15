@@ -691,7 +691,7 @@ tbody tr:hover td{background:var(--surf2)}
               <div class="form-group">
                 <label class="lbl">URL personalizada</label>
                 <div style="display:flex;gap:8px;align-items:center">
-                  <span style="font-size:13px;color:var(--t3);white-space:nowrap">rifatech.co/r/</span>
+                  <span id="slug-prefix-label" style="font-size:13px;color:var(--t3);white-space:nowrap">?r=</span>
                   <input type="text" id="f-slug" placeholder="moto-mt03-2026" oninput="updateSlugPreview()"/>
                 </div>
                 <div style="font-size:12px;color:var(--t3);margin-top:6px">
@@ -699,7 +699,6 @@ tbody tr:hover td{background:var(--surf2)}
                 </div>
               </div>
               <div id="slug-preview" style="margin-top:12px;font-size:14px;font-weight:700;color:var(--blue);word-break:break-all">
-                rifatech.co/r/
               </div>
             </div>
 
@@ -748,7 +747,7 @@ tbody tr:hover td{background:var(--surf2)}
           <div class="pub-sub">Comparte este link con tus compradores para que elijan sus números</div>
 
           <div class="pub-link-box" style="margin:0 auto;max-width:520px">
-            <div class="pub-link-url" id="final-link-url">rifatech.co/r/mi-rifa</div>
+            <div class="pub-link-url" id="final-link-url">—</div>
             <button class="btn btn-sm btn-primary pub-link-copy" onclick="copyLink()">Copiar</button>
           </div>
 
@@ -786,7 +785,7 @@ tbody tr:hover td{background:var(--surf2)}
               display:flex;align-items:center;justify-content:center;font-size:48px">🏆</div>
             <div style="padding:14px 16px;background:var(--surf2)">
               <div id="og-title" style="font-size:15px;font-weight:800;color:var(--t1);margin-bottom:4px">Rifa</div>
-              <div id="og-desc" style="font-size:13px;color:var(--t3)">rifatech.co</div>
+              <div id="og-desc" style="font-size:13px;color:var(--t3)"></div>
             </div>
           </div>
         </div>
@@ -978,6 +977,17 @@ const LOTERIAS=[
 ════════════════════════════════════════════ */
 const FMT=new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',maximumFractionDigits:0});
 
+/** Link público real de una rifa: usa el dominio donde esté alojado
+ *  el sitio (GitHub Pages, dominio propio, etc.) en vez de uno fijo.
+ *  El panel vive en organizador.html; la página pública es index.html. */
+function buildRaffleLink(slug){
+  const base=window.location.origin+window.location.pathname.replace(/organizador\.html$/,'');
+  return `${base}?r=${encodeURIComponent(slug)}`;
+}
+function buildRaffleLinkShort(slug){
+  return buildRaffleLink(slug).replace(/^https?:\/\//,'');
+}
+
 let Draft={
   prizeName:'',prizeValue:0,prizeDesc:'',photos:[],
   lotteryId:'bogota',drawDate:'',drawTime:'',nequi:'',bank:'',
@@ -1114,8 +1124,8 @@ function renderMisRifas(){
           <!-- Link -->
           <div style="background:var(--surf2);border:1px solid var(--border);border-radius:var(--r-md);
             padding:10px 14px;display:flex;align-items:center;gap:10px;margin-bottom:14px">
-            <span style="font-size:13px;font-weight:700;color:var(--blue);flex:1">rifatech.co/r/${r.slug}</span>
-            <button class="btn btn-sm btn-ghost" onclick="navigator.clipboard.writeText('https://rifatech.co/r/${r.slug}');showToast('Link copiado ✓')">Copiar</button>
+            <span style="font-size:13px;font-weight:700;color:var(--blue);flex:1">${buildRaffleLinkShort(r.slug)}</span>
+            <button class="btn btn-sm btn-ghost" onclick="navigator.clipboard.writeText(buildRaffleLink('${r.slug}'));showToast('Link copiado ✓')">Copiar</button>
             <button class="btn btn-sm" style="background:linear-gradient(135deg,#25D366,#128C7E);color:#fff;font-size:12px;padding:6px 12px;border-radius:var(--r-sm)" onclick="shareRaffleLink('${r.slug}')">💬</button>
           </div>
           <div style="display:flex;gap:8px">
@@ -1145,7 +1155,7 @@ function openDetalle(id){
   document.getElementById('det-sold-pct').textContent=pct+'%';
   document.getElementById('det-raised').textContent=FMT.format(raised);
   document.getElementById('det-progress').style.width=pct+'%';
-  const link=`rifatech.co/r/${r.slug}`;
+  const link=buildRaffleLinkShort(r.slug);
   document.getElementById('det-link').textContent=link;
 
   // Mini grid
@@ -1184,7 +1194,7 @@ function openDetalle(id){
 function copyDetLink(){
   const r=window._detRaffle;
   if(!r)return;
-  navigator.clipboard.writeText(`https://rifatech.co/r/${r.slug}`);
+  navigator.clipboard.writeText(buildRaffleLink(r.slug));
   showToast('Link copiado ✓');
 }
 
@@ -1296,7 +1306,7 @@ function updateSlugPreview(){
   const raw=document.getElementById('f-slug')?.value||'';
   const clean=raw.toLowerCase().replace(/[^a-z0-9-]/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,'');
   Draft.slug=clean;
-  document.getElementById('slug-preview').textContent=`rifatech.co/r/${clean||'mi-rifa'}`;
+  document.getElementById('slug-preview').textContent=buildRaffleLinkShort(clean||'mi-rifa');
 }
 
 function autoSlug(name){
@@ -1387,7 +1397,7 @@ function goWStep(n){
 function publishRaffle(){
   const status=document.querySelector('input[name="pub-status"]:checked').value;
   Draft.status=status;
-  publishedLink=`https://rifatech.co/r/${Draft.slug||'mi-rifa'}`;
+  publishedLink=buildRaffleLink(Draft.slug||'mi-rifa');
 
   // Agregar a demo list
   DemoRaffles.unshift({
@@ -1484,7 +1494,7 @@ function shareRaffleLink(slug,name){
     `📅 Sorteo: ${fmtDate(r.draw)}`,
     ``,
     `👇 Elige tu número aquí:`,
-    `https://rifatech.co/r/${slug}`,
+    buildRaffleLink(slug),
     ``,`_¡Buena suerte! 🍀_`,
   ].join('\n');
   window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`,'_blank');
