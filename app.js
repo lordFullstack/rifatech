@@ -28,9 +28,8 @@ const SUPABASE_URL      = '__SUPABASE_URL__';
 const SUPABASE_ANON_KEY = '__SUPABASE_ANON_KEY__';
 
 const SUPABASE_CONFIGURED =
-  !SUPABASE_URL.includes('__SUPABASE_URL__') &&
-  !SUPABASE_ANON_KEY.includes('__SUPABASE_ANON_KEY__') &&
-  SUPABASE_URL.startsWith('http');
+  /^https:\/\/[a-z0-9-]+\.supabase\.co\/?$/i.test(SUPABASE_URL) &&
+  SUPABASE_ANON_KEY.split('.').length === 3; // formato JWT válido
 
 const supabaseClient = (SUPABASE_CONFIGURED && window.supabase)
   ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
@@ -40,7 +39,7 @@ const supabaseClient = (SUPABASE_CONFIGURED && window.supabase)
  *  Sin slug (ej. visitar index.html directo) → modo demo local. */
 const RAFFLE_SLUG = new URLSearchParams(window.location.search).get('r');
 
-const REAL_MODE = Boolean(SUPABASE_CONFIGURED && RAFFLE_SLUG);
+const REAL_MODE = Boolean(supabaseClient && RAFFLE_SLUG);
 
 /** Construye un link público a una rifa respetando el dominio
  *  real donde esté alojado el sitio (GitHub Pages, dominio propio, etc.)
