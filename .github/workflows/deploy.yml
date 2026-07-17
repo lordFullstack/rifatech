@@ -56,7 +56,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Inyectar URL de Supabase en app.js
+      - name: Inyectar URL de Supabase en app.js y organizador.html
         # Reemplaza los placeholders con las variables del repo
         # Configura estas en: Settings → Secrets and variables → Actions
         env:
@@ -64,8 +64,8 @@ jobs:
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
           if [ -n "$SUPABASE_URL" ]; then
-            sed -i "s|__SUPABASE_URL__|$SUPABASE_URL|g" app.js
-            sed -i "s|__SUPABASE_ANON_KEY__|$SUPABASE_ANON_KEY|g" app.js
+            sed -i "s|__SUPABASE_URL__|$SUPABASE_URL|g" app.js organizador.html
+            sed -i "s|__SUPABASE_ANON_KEY__|$SUPABASE_ANON_KEY|g" app.js organizador.html
             echo "✓ Variables de Supabase inyectadas"
           else
             echo "⚠ SUPABASE_URL no configurada — usando modo demo (localStorage)"
