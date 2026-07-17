@@ -193,6 +193,23 @@ body{background:var(--bg);color:var(--t1);font-family:var(--font);min-height:100
 .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 .form-grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
 .form-group{display:flex;flex-direction:column;gap:6px}
+
+/* Modal edición rifa */
+.edit-modal-overlay{
+  display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);
+  z-index:1000;align-items:center;justify-content:center;padding:20px;
+}
+.edit-modal-overlay.show{display:flex}
+.edit-modal-card{
+  background:var(--surf1);border:1px solid var(--border);border-radius:var(--r-xl);
+  padding:24px;width:100%;max-width:440px;position:relative;
+  max-height:90vh;overflow-y:auto;
+}
+.edit-modal-card select{
+  width:100%;background:var(--surf2);border:1px solid var(--border);
+  border-radius:var(--r-md);padding:12px 14px;color:var(--t1);font-size:14px;
+  font-family:var(--font);
+}
 .form-group.full{grid-column:1/-1}
 label.lbl{font-size:12px;font-weight:700;color:var(--t3);letter-spacing:.5px;text-transform:uppercase}
 input[type=text],input[type=number],input[type=date],input[type=url],
@@ -866,7 +883,7 @@ tbody tr:hover td{background:var(--surf2)}
       <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px">
           <h3 style="font-size:16px;font-weight:800">Compradores</h3>
-          <button class="btn btn-sm btn-ghost">⬇ Exportar CSV</button>
+          <button class="btn btn-sm btn-ghost" onclick="exportBuyersCSV(Buyers.filter(b=>b.raffle===window._detRaffle?.id), window._detRaffle?.name)">⬇ Exportar CSV</button>
         </div>
         <div class="table-wrap">
           <table>
@@ -894,7 +911,7 @@ tbody tr:hover td{background:var(--surf2)}
       <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
           <h3 style="font-size:16px;font-weight:800">Todos los compradores</h3>
-          <button class="btn btn-sm btn-ghost">⬇ Exportar</button>
+          <button class="btn btn-sm btn-ghost" onclick="exportBuyersCSV(Buyers, 'Todos los compradores')">⬇ Exportar</button>
         </div>
         <div class="table-wrap">
           <table>
@@ -947,6 +964,47 @@ tbody tr:hover td{background:var(--surf2)}
 </div><!-- /shell -->
 
 <!-- TOAST -->
+<!-- MODAL: EDITAR RIFA -->
+<div class="edit-modal-overlay" id="edit-modal-overlay" onclick="if(event.target===this)closeEditModal()">
+  <div class="edit-modal-card">
+    <button onclick="closeEditModal()" style="position:absolute;top:14px;right:14px;background:none;border:none;color:var(--t3);font-size:20px;cursor:pointer">✕</button>
+    <h3 style="font-size:18px;font-weight:800;margin-bottom:18px">✏️ Editar rifa</h3>
+
+    <div class="form-group">
+      <label class="lbl">Nombre del premio</label>
+      <input type="text" id="edit-prize-name"/>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group">
+        <label class="lbl">Valor comercial (COP)</label>
+        <input type="number" id="edit-prize-value"/>
+      </div>
+      <div class="form-group">
+        <label class="lbl">Precio boleta (COP)</label>
+        <input type="number" id="edit-ticket-price"/>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="lbl">Fecha del sorteo</label>
+      <input type="date" id="edit-draw-date"/>
+    </div>
+    <div class="form-group">
+      <label class="lbl">Estado</label>
+      <select id="edit-status">
+        <option value="draft">📝 Borrador</option>
+        <option value="active">🟢 Activa</option>
+        <option value="paused">⏸ Pausada</option>
+        <option value="finished">🏁 Finalizada</option>
+      </select>
+    </div>
+
+    <div style="display:flex;gap:10px;margin-top:20px">
+      <button class="btn btn-md btn-ghost" style="flex:1" onclick="closeEditModal()">Cancelar</button>
+      <button class="btn btn-md btn-primary" style="flex:1" id="edit-save-btn" onclick="saveEditRaffle()">Guardar cambios</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -1093,6 +1151,7 @@ async function loadRaffles(){
     sold:(counts[r.id]&&counts[r.id].sold)||0,
     reserved:(counts[r.id]&&counts[r.id].reserved)||0,
     price:r.ticket_price,
+    prizeValue:r.prize_value_cop,
     draw:r.draw_date,
     lottery:r.lottery_name,
     slug:r.slug,
@@ -1301,7 +1360,7 @@ function renderMisRifas(){
               <div style="font-size:18px;font-weight:900;color:var(--t1)">${esc(r.name)}</div>
               <div style="font-size:13px;color:var(--t3);margin-top:2px">${r.lottery} · ${fmtDate(r.draw)}</div>
             </div>
-            <span class="badge ${r.status==='active'?'badge-green':'badge-blue'}">${r.status==='active'?'🟢 Activa':'📝 Borrador'}</span>
+            <span class="badge ${r.status==='active'?'badge-green':r.status==='paused'?'badge-amber':'badge-blue'}">${r.status==='active'?'🟢 Activa':r.status==='paused'?'⏸ Pausada':'📝 Borrador'}</span>
           </div>
           <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:14px">
             <div><div style="font-size:10px;color:var(--t3);font-weight:700;text-transform:uppercase;letter-spacing:1px">Vendidas</div>
@@ -1324,8 +1383,8 @@ function renderMisRifas(){
           </div>
           <div style="display:flex;gap:8px">
             <button class="btn btn-sm btn-primary" onclick="openDetalle('${r.id}')">Ver detalle →</button>
-            <button class="btn btn-sm btn-ghost" onclick="showToast('Modo edición próximamente')">✏️ Editar</button>
-            <button class="btn btn-sm btn-danger" onclick="showToast('Rifa pausada')">⏸ Pausar</button>
+            <button class="btn btn-sm btn-ghost" onclick="openEditModal('${r.id}')">✏️ Editar</button>
+            <button class="btn btn-sm btn-danger" onclick="toggleRaffleStatus('${r.id}')">${r.status==='paused'?'▶ Reactivar':'⏸ Pausar'}</button>
           </div>
         </div>
       </div>
@@ -1456,8 +1515,158 @@ async function markPaid(raffleId, buyerPhone){
 }
 
 /* ════════════════════════════════════════════
-   WIZARD: LOTERÍAS
+   EDITAR / PAUSAR RIFA
 ════════════════════════════════════════════ */
+let _editingRaffleId=null;
+
+function openEditModal(id){
+  const r=Raffles.find(x=>x.id===id);
+  if(!r)return;
+  _editingRaffleId=id;
+  document.getElementById('edit-prize-name').value=r.name;
+  document.getElementById('edit-prize-value').value=r.prizeValue||'';
+  document.getElementById('edit-ticket-price').value=r.price;
+  document.getElementById('edit-draw-date').value=r.draw;
+  document.getElementById('edit-status').value=r.status;
+  document.getElementById('edit-modal-overlay').classList.add('show');
+}
+
+function closeEditModal(){
+  document.getElementById('edit-modal-overlay').classList.remove('show');
+  _editingRaffleId=null;
+}
+
+async function saveEditRaffle(){
+  if(!_editingRaffleId)return;
+  const id=_editingRaffleId;
+  const btn=document.getElementById('edit-save-btn');
+  const updates={
+    prize_name:  document.getElementById('edit-prize-name').value.trim(),
+    title:       document.getElementById('edit-prize-name').value.trim(),
+    ticket_price:Number(document.getElementById('edit-ticket-price').value)||0,
+    draw_date:   document.getElementById('edit-draw-date').value,
+    status:      document.getElementById('edit-status').value,
+  };
+  const prizeValue=Number(document.getElementById('edit-prize-value').value)||0;
+  if(prizeValue) updates.prize_value_cop=prizeValue;
+
+  if(!updates.prize_name){ showToast('El nombre del premio no puede estar vacío'); return; }
+
+  btn.disabled=true; btn.textContent='Guardando...';
+
+  if(REAL_MODE){
+    const {error}=await supabaseClient.from('raffles').update(updates).eq('id',id);
+    if(error){
+      console.error('[RIFATECH] Error editando rifa:',error);
+      showToast('❌ Error al guardar los cambios');
+      btn.disabled=false; btn.textContent='Guardar cambios';
+      return;
+    }
+    await loadRaffles();
+    await loadBuyers();
+    await updateDashboardStats();
+  }else{
+    const r=Raffles.find(x=>x.id===id);
+    if(r){
+      r.name=updates.prize_name;
+      r.price=updates.ticket_price;
+      r.draw=updates.draw_date;
+      r.status=updates.status;
+    }
+  }
+
+  btn.disabled=false; btn.textContent='Guardar cambios';
+  closeEditModal();
+  showToast('✅ Rifa actualizada');
+  renderMisRifas();
+  if(document.getElementById('screen-dashboard')?.classList.contains('active')) renderDashboard();
+  if(window._detRaffle && window._detRaffle.id===id) openDetalle(id);
+}
+
+/** Alterna entre 'active' y 'paused'. No toca rifas 'draft' o
+ *  'finished' (esas se manejan aparte, no con este botón). */
+async function toggleRaffleStatus(id){
+  const r=Raffles.find(x=>x.id===id);
+  if(!r)return;
+  const newStatus = r.status==='paused' ? 'active' : 'paused';
+
+  if(REAL_MODE){
+    const {error}=await supabaseClient.from('raffles').update({status:newStatus}).eq('id',id);
+    if(error){
+      console.error('[RIFATECH] Error cambiando estado:',error);
+      showToast('❌ Error al cambiar el estado');
+      return;
+    }
+    await loadRaffles();
+    await updateDashboardStats();
+  }else{
+    r.status=newStatus;
+  }
+
+  showToast(newStatus==='paused'?'⏸ Rifa pausada':'▶ Rifa reactivada');
+  renderMisRifas();
+  if(document.getElementById('screen-dashboard')?.classList.contains('active')) renderDashboard();
+}
+
+/** Genera un CSV con las columnas exactas que usa la plantilla
+ *  oficial de Google Contacts, para que se pueda importar
+ *  directo en contacts.google.com → Importar, sin mapear nada
+ *  a mano. Cada comprador queda agrupado con la etiqueta
+ *  "* RifaTech" para poder encontrarlos fácil después. */
+function exportBuyersCSV(buyersList, label){
+  if(!buyersList || buyersList.length===0){
+    showToast('No hay compradores para exportar');
+    return;
+  }
+
+  const headers=[
+    'Name','Given Name','Family Name',
+    'Phone 1 - Type','Phone 1 - Value',
+    'Group Membership','Notes'
+  ];
+
+  const rows=buyersList.map(b=>{
+    const r=Raffles.find(x=>x.id===b.raffle)||{name:'',price:0};
+    const parts=(b.name||'').trim().split(/\s+/);
+    const givenName=parts[0]||'';
+    const familyName=parts.slice(1).join(' ')||'';
+    const phoneValue='+57'+String(b.phone||'').replace(/\D/g,'');
+    const numeros=b.numbers.map(n=>String(n).padStart(2,'0')).join(', ');
+    const estado=b.status==='paid'?'Pagado':'Reservado';
+    const total=FMT.format(b.numbers.length*(r.price||0));
+    const notes=`Rifa: ${r.name} | Números: ${numeros} | Estado: ${estado} | Total: ${total}`;
+
+    return [
+      csvField(b.name),
+      csvField(givenName),
+      csvField(familyName),
+      'Mobile',
+      csvField(phoneValue),
+      csvField('* RifaTech'),
+      csvField(notes),
+    ].join(',');
+  });
+
+  const csv='\uFEFF'+[headers.join(','), ...rows].join('\r\n');
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  const safeLabel=(label||'compradores').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-');
+  a.href=url;
+  a.download=`rifatech-contactos-${safeLabel}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast(`✅ ${buyersList.length} contacto(s) exportados`);
+}
+
+/** Escapa un valor para que sea seguro dentro de una celda CSV. */
+function csvField(value){
+  const s=String(value==null?'':value);
+  if(/[",\r\n]/.test(s)) return '"'+s.replace(/"/g,'""')+'"';
+  return s;
+}
 function renderLotGrid(){
   const el=document.getElementById('lot-grid');
   el.innerHTML=LOTERIAS.map(l=>`
