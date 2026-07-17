@@ -465,23 +465,23 @@ tbody tr:hover td{background:var(--surf2)}
       <div class="stat-grid">
         <div class="stat-card" style="--accent:var(--green)">
           <div class="stat-label">Ingresos este mes</div>
-          <div class="stat-value">$2.4M</div>
-          <div class="stat-sub">+18% vs mes anterior</div>
+          <div class="stat-value" id="stat-ingresos">$0</div>
+          <div class="stat-sub" id="stat-ingresos-sub">&nbsp;</div>
         </div>
         <div class="stat-card" style="--accent:var(--blue)">
           <div class="stat-label">Boletas vendidas</div>
-          <div class="stat-value">148</div>
+          <div class="stat-value" id="stat-boletas">0</div>
           <div class="stat-sub">en todas las rifas activas</div>
         </div>
         <div class="stat-card" style="--accent:var(--amber)">
           <div class="stat-label">Rifas activas</div>
-          <div class="stat-value">3</div>
-          <div class="stat-sub">1 por cerrar pronto</div>
+          <div class="stat-value" id="stat-rifas-activas">0</div>
+          <div class="stat-sub" id="stat-rifas-activas-sub">&nbsp;</div>
         </div>
         <div class="stat-card" style="--accent:var(--purple)">
           <div class="stat-label">Compradores únicos</div>
-          <div class="stat-value">89</div>
-          <div class="stat-sub">+12 esta semana</div>
+          <div class="stat-value" id="stat-compradores">0</div>
+          <div class="stat-sub" id="stat-compradores-sub">&nbsp;</div>
         </div>
       </div>
 
@@ -1005,6 +1005,7 @@ const LOTERIAS=[
    ESTADO
 ════════════════════════════════════════════ */
 const FMT=new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',maximumFractionDigits:0});
+const FMT_COMPACT=new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',notation:'compact',maximumFractionDigits:1});
 
 /** Link público real de una rifa: usa el dominio donde esté alojado
  *  el sitio (GitHub Pages, dominio propio, etc.) en vez de uno fijo.
@@ -1139,6 +1140,72 @@ async function loadBuyers(){
     if(t.status==='reserved') grouped[key].status='reserved';
   });
   Buyers=Object.values(grouped);
+}
+
+/** Calcula ingresos del mes (vs mes anterior), boletas vendidas y
+ *  compradores únicos, a partir de los tickets pagados reales. */
+async function loadStats(){
+  if(!REAL_MODE){
+    return {ingresosMes:2400000,ingresosMesAnterior:2033898,boletas:148,compradoresUnicos:89};
+  }
+  const ids=Raffles.map(r=>r.id);
+  if(!ids.length) return {ingresosMes:0,ingresosMesAnterior:0,boletas:0,compradoresUnicos:0};
+
+  const {data,error}=await supabaseClient
+    .from('tickets')
+    .select('amount_paid,paid_at,buyer_phone')
+    .in('raffle_id',ids)
+    .eq('status','paid');
+
+  if(error){
+    console.error('[RIFATECH] Error cargando estadísticas:',error);
+    return {ingresosMes:0,ingresosMesAnterior:0,boletas:0,compradoresUnicos:0};
+  }
+
+  const now=new Date();
+  const ymThis=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+  const prevDate=new Date(now.getFullYear(),now.getMonth()-1,1);
+  const ymPrev=prevDate.getFullYear()+'-'+String(prevDate.getMonth()+1).padStart(2,'0');
+
+  let ingresosMes=0, ingresosMesAnterior=0;
+  const phones=new Set();
+  (data||[]).forEach(t=>{
+    const ym=(t.paid_at||'').slice(0,7);
+    if(ym===ymThis) ingresosMes+=(t.amount_paid||0);
+    if(ym===ymPrev) ingresosMesAnterior+=(t.amount_paid||0);
+    if(t.buyer_phone) phones.add(t.buyer_phone);
+  });
+
+  return {ingresosMes,ingresosMesAnterior,boletas:(data||[]).length,compradoresUnicos:phones.size};
+}
+
+async function updateDashboardStats(){
+  const s=await loadStats();
+
+  document.getElementById('stat-ingresos').textContent=FMT_COMPACT.format(s.ingresosMes);
+  const ingresosSub=document.getElementById('stat-ingresos-sub');
+  if(s.ingresosMesAnterior>0){
+    const delta=Math.round(((s.ingresosMes-s.ingresosMesAnterior)/s.ingresosMesAnterior)*100);
+    ingresosSub.textContent=`${delta>=0?'+':''}${delta}% vs mes anterior`;
+  }else{
+    ingresosSub.textContent='Sin datos del mes anterior';
+  }
+
+  document.getElementById('stat-boletas').textContent=s.boletas;
+
+  const activas=Raffles.filter(r=>r.status==='active');
+  document.getElementById('stat-rifas-activas').textContent=activas.length;
+  const now=new Date();
+  const porCerrar=activas.filter(r=>{
+    if(!r.draw) return false;
+    const dias=(new Date(r.draw)-now)/86400000;
+    return dias>=0 && dias<=7;
+  }).length;
+  document.getElementById('stat-rifas-activas-sub').textContent=
+    porCerrar>0?`${porCerrar} por cerrar pronto`:'Ninguna por cerrar pronto';
+
+  document.getElementById('stat-compradores').textContent=s.compradoresUnicos;
+  document.getElementById('stat-compradores-sub').textContent='en total';
 }
 
 /* ════════════════════════════════════════════
@@ -1382,6 +1449,7 @@ async function markPaid(raffleId, buyerPhone){
   showToast(`✅ ${data} boleta(s) marcadas como pagadas`);
   await loadRaffles();
   await loadBuyers();
+  await updateDashboardStats();
   // Si estamos viendo el detalle de esta rifa, refrescar la vista
   if(window._detRaffle && window._detRaffle.id===raffleId) openDetalle(raffleId);
   if(document.getElementById('screen-compradores')?.classList.contains('active')) renderAllBuyers();
@@ -1590,6 +1658,7 @@ async function publishRaffle(){
     }
     await loadRaffles();
     await loadBuyers();
+    await updateDashboardStats();
   }else{
     // Fallback modo demo (sin Supabase configurado)
     Raffles.unshift({
@@ -1744,6 +1813,7 @@ function showToast(msg){
 document.addEventListener('DOMContentLoaded',async ()=>{
   await loadRaffles();
   await loadBuyers();
+  await updateDashboardStats();
   renderDashboard();
   renderLotGrid();
   selectNums(100);
