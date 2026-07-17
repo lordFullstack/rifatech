@@ -878,6 +878,7 @@ tbody tr:hover td{background:var(--surf2)}
                 <th>Total</th>
                 <th>Estado</th>
                 <th>Fecha</th>
+                <th></th>
               </tr>
             </thead>
             <tbody id="det-buyers-tbody"></tbody>
@@ -905,6 +906,7 @@ tbody tr:hover td{background:var(--surf2)}
                 <th>Números</th>
                 <th>Total</th>
                 <th>Estado</th>
+                <th></th>
               </tr>
             </thead>
             <tbody id="all-buyers-tbody"></tbody>
@@ -1323,6 +1325,7 @@ function openDetalle(id){
       <td>${FMT.format(b.numbers.length*r.price)}</td>
       <td><span class="badge ${b.status==='paid'?'badge-green':'badge-amber'}">${b.status==='paid'?'Pagado':'Reservado'}</span></td>
       <td>${b.date}</td>
+      <td>${b.status==='reserved'&&REAL_MODE?`<button class="btn btn-sm btn-primary" onclick="markPaid('${r.id}','${b.phone}')">✅ Marcar pagado</button>`:''}</td>
     </tr>`).join('');
 
   // Store current raffle for share functions
@@ -1357,8 +1360,31 @@ function renderAllBuyers(){
       <td>${b.numbers.map(n=>String(n).padStart(2,'0')).join(', ')}</td>
       <td>${FMT.format(b.numbers.length*r.price)}</td>
       <td><span class="badge ${b.status==='paid'?'badge-green':'badge-amber'}">${b.status==='paid'?'Pagado':'Reservado'}</span></td>
+      <td>${b.status==='reserved'&&REAL_MODE?`<button class="btn btn-sm btn-primary" onclick="markPaid('${b.raffle}','${b.phone}')">✅ Marcar pagado</button>`:''}</td>
     </tr>`;
   }).join('');
+}
+
+/** Marca como pagados todos los números reservados de un
+ *  comprador en una rifa (llama al RPC confirm_payment_by_buyer). */
+async function markPaid(raffleId, buyerPhone){
+  if(!REAL_MODE) return;
+  const {data,error}=await supabaseClient.rpc('confirm_payment_by_buyer',{
+    p_raffle_id: raffleId,
+    p_buyer_phone: buyerPhone,
+    p_method: 'nequi',
+  });
+  if(error){
+    console.error('[RIFATECH] Error confirmando pago:',error);
+    showToast('❌ Error al confirmar el pago');
+    return;
+  }
+  showToast(`✅ ${data} boleta(s) marcadas como pagadas`);
+  await loadRaffles();
+  await loadBuyers();
+  // Si estamos viendo el detalle de esta rifa, refrescar la vista
+  if(window._detRaffle && window._detRaffle.id===raffleId) openDetalle(raffleId);
+  if(document.getElementById('screen-compradores')?.classList.contains('active')) renderAllBuyers();
 }
 
 /* ════════════════════════════════════════════
